@@ -1,5 +1,5 @@
 # Ledger Lite
-A demo payments API with fake data. TypeScript, Node 20, Fastify,
+A demo payments API with fake data. TypeScript, Node 22, Fastify,
 SQLite (better-sqlite3), zod, Vitest.
 
 ## Commands

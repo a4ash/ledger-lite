@@ -2,7 +2,7 @@
 
 A demo payments API with fake data, built in four 2-hour blocks. Task ids (1-1, 2-3, ...) match Ash's project page. When asked to do a task, do only that task, show a plan first, and finish by running `npm test`.
 
-Stack: Node 20, TypeScript (strict), Fastify, better-sqlite3, zod, Vitest, GitHub Actions.
+Stack: Node 22, TypeScript (strict), Fastify, better-sqlite3, zod, Vitest, GitHub Actions.
 
 ---
 
@@ -23,7 +23,7 @@ Stack: Node 20, TypeScript (strict), Fastify, better-sqlite3, zod, Vitest, GitHu
 - Done when: the health test passes.
 
 **1-3 CI**
-- `.github/workflows/test.yml`: checkout, setup-node 20, `npm ci`, `npm test` on push and pull_request.
+- `.github/workflows/test.yml`: checkout, setup-node 22, `npm ci`, `npm test` on push and pull_request.
 - Done when: the workflow file exists and the tests pass locally.
 
 **1-4 Decision log**
