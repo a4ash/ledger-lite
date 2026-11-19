@@ -7,3 +7,7 @@ export function toCents(input: string): Cents {
     if (!Number.isSafeInteger(cents)) throw new Error("Amount too large");
     return cents;
 }
+
+export function toDollars(cents: Cents): string { 
+    return (cents / 100).toFixed(2); 
+}

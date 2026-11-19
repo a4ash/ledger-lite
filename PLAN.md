@@ -2,70 +2,60 @@
 
 A demo payments API with fake data, built in four 2-hour blocks. Task ids (1-1, 2-3, ...) match Ash's project page. When asked to do a task, do only that task, show a plan first, and finish by running `npm test`.
 
-Stack: Node 22, TypeScript (strict), Fastify, better-sqlite3, zod, Vitest, GitHub Actions.
+Stack: Node 22, TypeScript (strict, `nodenext`), ES modules (`"type": "module"`, so relative imports end in `.js`), Fastify, better-sqlite3, zod, Vitest, GitHub Actions.
 
 ---
 
-## Step 1 · Scaffold (Block 1)
+## Step 1 · Scaffold (Block 1) · done
 
-**1-0 Claude Code setup** (done by Ash): CLAUDE.md and this file exist.
+**1-0 Claude Code setup**: CLAUDE.md and this file exist.
 
-**1-1 Install the stack**
-- `npm init -y`; install `fastify better-sqlite3 zod`; dev: `typescript tsx vitest @types/node @types/better-sqlite3`.
-- `tsconfig.json` with `"strict": true`, `"outDir": "dist"`.
-- Scripts: `"dev": "tsx watch src/server.ts"`, `"test": "vitest run"`.
-- Done when: `npm test` runs (even with no tests yet).
+**1-1 Install the stack**: `fastify better-sqlite3 zod`; dev: `typescript tsx vitest @types/node @types/better-sqlite3`. Scripts: `"dev": "tsx watch src/server.ts"`, `"test": "vitest run"`.
 
 **1-2 Health route and first test**
-- `src/app.ts` exports `buildApp(dbPath: string)` returning the Fastify instance; `src/server.ts` only calls `listen()`.
-- `GET /health` returns 200.
-- `test/health.test.ts` uses `buildApp(':memory:')` and `app.inject()`.
-- Done when: the health test passes.
+- `src/app.ts` exports `buildApp(dbPath: string)`: opens `new Database(dbPath)`, runs `migrate(db)`, closes the db in an `onClose` hook. `GET /health` returns `{ status: "ok" }`.
+- `src/server.ts` only calls `buildApp("ledger.db")` and `listen({ port: 3000 })`.
+- `test/health.test.ts` uses `buildApp(":memory:")` and `app.inject()`.
 
-**1-3 CI**
-- `.github/workflows/test.yml`: checkout, setup-node 22, `npm ci`, `npm test` on push and pull_request.
-- Done when: the workflow file exists and the tests pass locally.
+**1-3 CI**: `.github/workflows/test.yml`, Node 22, `npm ci`, `npm test` on push and pull_request.
 
-**1-4 Decision log**
-- `DECISIONS.md`: one line per choice (Fastify over Express, SQLite first, cents not floats).
-- README section "How I used Claude Code" (Ash writes it; Claude may draft).
+**1-4 Decision log**: `DECISIONS.md`, one line per choice; README section "How I used Claude Code".
 
-## Step 2 · Money core (Block 2)
+## Step 2 · Money core (Block 2) · done
 
-**2-1 Money as integer cents**
-- `src/money.ts`: `type Cents = number`; `toCents(input: string): Cents` accepts `^\d+(\.\d{1,2})?$` only and throws otherwise. Format to dollars only at the API edge, with `currency: "CAD"`.
-- Ash writes `toCents` himself; Claude writes tests that try to break it and must not edit `money.ts`.
-- Done when: tests cover "12.34" → 1234, "0.1" → 10, and rejection of "-5", "1.234", "abc", "".
+**2-1 Money as integer cents** (`src/money.ts`, `test/money.test.ts`)
+- `type Cents = number`; `toCents(input: string): Cents` accepts `^\d+(\.\d{1,2})?$` only, rejects unsafe integers.
+- Still to add before 3-1: `toDollars(cents: Cents): string` returning `(cents / 100).toFixed(2)`. Format only at the API edge, with `currency: "CAD"`.
 
-**2-2 Double-entry ledger tables**
-- Tables: `accounts(id, name)`, `transfers(id, status, amount_cents > 0, created_at)`, `entries(id, transfer_id, account_id, amount_cents)`; negative = money out, positive = money in.
-- Balances are never stored: `SUM(amount_cents)` per account.
-- All SQL in `src/db.ts`.
+**2-2 Double-entry ledger** (`src/db.ts`; all SQL lives here)
+- `migrate(db)`: `PRAGMA foreign_keys = ON`, then `CREATE TABLE IF NOT EXISTS` for `accounts(id INTEGER PK, name)`, `transfers(id INTEGER PK, status, amount_cents > 0, created_at)`, `entries(id, transfer_id, account_id, amount_cents)`; negative = money out.
+- Helpers: `getBalance` (SUM of entries, never stored), `createAccount`, `createTransfer`, `addEntry`, `postTransfer(db, from, to, amount)` (one transaction), `reverseTransfer` (completed only; appends opposite entries), `listEntries`, `sumAllEntries`, `listTables`.
 
-**2-3 Ledger invariant**
-- Test: after any sequence of transfers, the sum of all entries is 0.
-- Entries are append-only: no UPDATE or DELETE on `entries`. Reversals write opposite entries.
+**2-3 Ledger invariant** (`test/ledger.test.ts`, `test/db.test.ts`): after any sequence of transfers and reversals, `sumAllEntries(db)` is 0. Entries are append-only.
 
 ## Step 3 · Safe money movement (Block 3) · minimum shippable
 
-Do 3-3's tests before 3-1's implementation.
+Tests for 3-3 are written first, in `test/money-bugs.test.ts`.
 
-**3-1 `POST /transfers` with `Idempotency-Key`**
-- Table `idempotency_keys(key PRIMARY KEY, request_hash, status_code, response_body)`.
-- Missing header → 400. Same key + same body → return the saved response. Same key + different body → 422.
-- Validate the body with zod. Write the transfer, both entries and the key in ONE transaction.
-- Response: `{ id, status, amount, currency: "CAD" }`, 201.
+**3-1 `POST /transfers` with `Idempotency-Key`** (Ash writes this task himself)
+- `idempotency_keys(key PK, request_hash, status_code, response_body)` is in `migrate`; `findKey` returns `{ requestHash, statusCode, body }`; `saveKey(db, key, hash, status, body)`. No `insertTransfer`/`insertEntries`: `postTransfer` already does that.
+- `accounts` gets `is_funding INTEGER NOT NULL DEFAULT 0`; `createAccount(db, name, { funding?: boolean } = {})`; `isFunding(db, id)`. (Delete local `ledger.db` once so the table is rebuilt.)
+- `src/money.ts`: `toDollars(cents)` formats 1234 as "12.34" (the name `transfers.ts` already imports; not `formatCents`).
+- `src/transfers.ts`: the core transfer service, no HTTP. `createTransferIdempotent(db, key, { fromAccountId, toAccountId, amount })` returns `{ statusCode, body }`. It hashes the validated values (so "12.3" and "12.30" match), then in ONE `db.transaction`: saved key + same hash → saved response; saved key + different hash → 422; otherwise `postTransfer` (nested transaction = savepoint), build `{ id, status: "completed", amount: toDollars(cents), currency: "CAD" }`, `saveKey`, 201. A foreign-key error (unknown account) → 422, nothing written, key not saved.
+- `src/routes/transfers.ts`: `registerTransferRoutes(app, db)`, HTTP only. Missing/empty key → 400. zod body `{ from_account_id: int, to_account_id: int, amount: "12.34" }`, bad body → 400, same account both sides → 400, `toCents` rejects → 400. Then calls the service.
+- `src/app.ts`: `app.decorate("db", db)` (with a `declare module "fastify"` block) so tests can use `app.db`; calls `registerTransferRoutes(app, db)`.
+- `test/transfers.test.ts`: valid request → 201 with the right body; the 400 cases; unknown account → 422 and no entries; `sumAllEntries` is 0 at the end.
+- Done when: money bugs 1, 2 and the bonus pass in `test/money-bugs.test.ts`; `npx tsc --noEmit` is clean.
 
-**3-2 Status machine and insufficient funds**
-- `pending → completed | failed`, `completed → reversed`; anything else is rejected.
-- A transfer that would take a non-funding account below zero → 422, nothing written.
-- `POST /transfers/:id/reverse` only from `completed`; writes opposite entries.
+**3-2 Overdraft and reversal route** done
+- In `createTransferIdempotent`, inside the transaction before `postTransfer`: if the source isn't a funding account and `getBalance < amount` → 422, nothing written.
+- Un-skip money bug 3 in `test/money-bugs.test.ts`.
+- Spec: `test/reversals.test.ts` (8 tests). `POST /transfers/:id/reverse` needs an `Idempotency-Key` (missing → 400); a non-integer id → 400; success → 200 `{ id, status: "reversed", amount, currency: "CAD" }`; same key replays the saved 200; unknown or already reversed transfer, a key already used on `POST /transfers`, or a reversal that would overdraw a non-funding receiver → 422, nothing written, key not saved.
+- `src/db.ts`: `reverseTransfer` returns the amount in `Cents` (`return db.transaction(...)()`); new `getTransfer(db, id)` returns `{ id, status, amount_cents } | undefined`.
+- `src/transfers.ts`: `reverseTransferIdempotent(db, key, transferId)` hashes `["reverse", transferId]`, then in ONE `db.transaction`: saved key checks (as in 3-1) → `getTransfer` (unknown/not completed → 422) → receiver overdraft check → `reverseTransfer` (savepoint) → `saveKey` 200.
+- `src/routes/transfers.ts`: the route, HTTP only; `z.coerce.number().int().positive()` for the `:id` param; calls the service.
 
-**3-3 Tests for the three money bugs**
-- Same request + same key twice → same response, exactly two entries.
-- Same key, different amount → 422.
-- Overdraft → 422, no entries.
-- Bonus: the same request twice via `Promise.all`; the ledger still balances.
+**3-3 Tests for the three money bugs** (`test/money-bugs.test.ts`, done): double payout, key reuse, overdraft (skipped until 3-2), plus the `Promise.all` bonus.
 
 **3-4 README v1**
 - One-line description, a `curl` example with `Idempotency-Key`, CI badge.
@@ -74,9 +64,9 @@ Do 3-3's tests before 3-1's implementation.
 
 ## Step 4 · Reskin (Block 4)
 
-A skin = one route file in `src/skins/`, one business rule, two tests. It must call the core transfer service and never write ledger entries directly.
+A skin = one route file in `src/skins/`, one business rule, two tests. It must call `createTransferIdempotent` from `src/transfers.ts` (and `reverseTransferIdempotent` for reversals) and never write ledger entries directly.
 
-**4-1 Cash-advance skin** (`src/skins/advances.ts`)
+**4-1 Cash-advance skin** (`src/skins/advances.ts` exporting `registerAdvances(app, db)`, called from `buildApp`; tests in `test/advances.test.ts`)
 - `POST /advances` (Idempotency-Key required): eligible if the user has at least two recurring paycheque deposits in the last 60 days; limit is 30% of the average deposit, capped at $350.
 - `POST /advances/:id/repay` moves the amount back; a second advance is refused while one is open.
 - Tests: an ineligible user gets 422; a repaid advance returns both accounts to their starting balances.
